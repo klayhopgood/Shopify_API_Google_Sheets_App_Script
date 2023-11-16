@@ -1,0 +1,142 @@
+function fetchDataFromShopify() {
+  var startDate = new Date();
+  startDate.setMonth(startDate.getMonth() - 1);
+  startDate.setDate(1); // Optional: Adjust this to set the desired start date
+
+  var formattedStartDate = formatDate(startDate);
+  var apiUrl = "https://ENTER HERE.myshopify.com/admin/api/2023-01/orders.json?status=any&created_at_min=" + formattedStartDate;
+  var headers = {
+    "X-Shopify-Access-Token": "ENTER HERE",
+    "Content-Type": "application/json"
+  };
+
+  var ordersData = [];
+  var pageUrl = apiUrl;
+
+  do {
+    var response = UrlFetchApp.fetch(pageUrl, {method: "get", headers: headers});
+    var pageOrders = JSON.parse(response.getContentText()).orders;
+    ordersData = ordersData.concat(pageOrders);
+
+    pageUrl = getNextPageUrl(response.getHeaders()['Link']);
+  } while(pageUrl);
+
+  // Process and append orders data to Google Sheets
+  processOrdersData(ordersData);
+}
+
+function getNextPageUrl(linkHeader) {
+  if (!linkHeader) {
+    return null;
+  }
+
+  var links = linkHeader.split(',');
+  var nextPageLink = links.find(function(link) {
+    return link.includes('rel="next"');
+  });
+
+  if (!nextPageLink) {
+    return null;
+  }
+
+  var urlMatch = nextPageLink.match(/<(.*?)>; rel="next"/);
+  return urlMatch ? urlMatch[1] : null;
+}
+
+
+function processOrdersData(ordersData) {
+  var dailyRevenueSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Daily Revenue");
+  var productSalesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Product Sales");
+  var largestOrdersSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Largest Orders");
+
+  var dailyRevenue = {};
+  var productSales = [];
+  var largestOrders = [];
+
+  ordersData.forEach(function(order) {
+    var orderDate = order.created_at.split("T")[0];
+    var customerName = order.customer ? (order.customer.first_name + " " + order.customer.last_name) : "Unknown";
+
+    // Calculate daily revenue
+    if (!dailyRevenue[orderDate]) {
+      dailyRevenue[orderDate] = 0;
+    }
+    dailyRevenue[orderDate] += parseFloat(order.total_price);
+
+    // Record each product sale
+    order.line_items.forEach(function(item) {
+      productSales.push([
+        item.name,
+        parseFloat(item.price) * item.quantity,
+        item.quantity,
+        orderDate
+      ]);
+    });
+
+    // Track largest orders
+    largestOrders.push({
+      id: order.id,
+      customer: customerName,
+      total: parseFloat(order.total_price),
+      date: orderDate
+    });
+  });
+
+  // Update the sheets after processing all orders
+  // Update Daily Revenue
+  updateSheetData(dailyRevenueSheet, Object.keys(dailyRevenue).map(function(date) {
+    return [date, dailyRevenue[date]];
+  }), ["Date", "Revenue"]);
+
+  // Update Product Sales
+  updateSheetData(productSalesSheet, productSales, ["Product", "Revenue", "Units Sold", "Sale Date"]);
+
+  // Update Largest Orders with Customer Name
+  updateSheetData(largestOrdersSheet, largestOrders.map(function(order) {
+    return [
+      order.id.toString(),
+      order.customer,
+      order.total,
+      order.date
+    ];
+  }), ["Order ID", "Customer Name", "Amount", "Date"]);
+}
+
+function updateSheetData(sheet, data, headers) {
+  sheet.clear();
+  sheet.appendRow(headers);
+  data.forEach(function(row) {
+    sheet.appendRow(row);
+  });
+}
+
+function formatDate(date, monthOnly) {
+  var d = new Date(date),
+      month = '' + (d.getMonth() + 1),
+      day = '' + d.getDate(),
+      year = d.getFullYear();
+
+  if (monthOnly) return month + '/' + year;
+  if (month.length < 2) 
+      month = '0' + month;
+  if (day.length < 2) 
+      day = '0' + day;
+
+  return [year, month, day].join('-');
+}
+
+function setTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "fetchDataFromShopify") {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+
+  ScriptApp.newTrigger("fetchDataFromShopify")
+    .timeBased()
+    .atHour(23)
+    .inTimezone("Australia/Melbourne")
+    .everyDays(1)
+    .create();
+}
