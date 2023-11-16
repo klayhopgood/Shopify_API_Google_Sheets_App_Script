@@ -1,0 +1,148 @@
+function fetchDataFromShopify() {
+  var dailyRevenueSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Daily Revenue");
+  var mostRecentDate = getMostRecentDate(dailyRevenueSheet);
+  mostRecentDate.setDate(mostRecentDate.getDate() + 1); // Start from the next day
+
+  var formattedStartDate = formatDate(mostRecentDate);
+  var apiUrl = "https://ENTER HERE.myshopify.com/admin/api/2023-01/orders.json?status=any&created_at_min=" + formattedStartDate;
+  var headers = {
+    "X-Shopify-Access-Token": "ENTER HERE",
+    "Content-Type": "application/json"
+  };
+
+  var ordersData = [];
+  var pageUrl = apiUrl;
+
+  do {
+    var response = UrlFetchApp.fetch(pageUrl, {method: "get", headers: headers});
+    var pageOrders = JSON.parse(response.getContentText()).orders;
+    ordersData = ordersData.concat(pageOrders);
+
+    pageUrl = getNextPageUrl(response.getHeaders()['Link']);
+  } while(pageUrl);
+
+  processOrdersData(ordersData);
+}
+
+function getMostRecentDate(sheet) {
+  var lastRow = sheet.getLastRow();
+  var dateColumn = 1; // Assuming the date is in the first column
+  if (lastRow > 1) {
+    var mostRecentDate = sheet.getRange(lastRow, dateColumn).getValue();
+    return new Date(mostRecentDate);
+  } else {
+    return new Date('2021-01-01'); // Default date if no data is present
+  }
+}
+
+function getNextPageUrl(linkHeader) {
+  if (!linkHeader) {
+    return null;
+  }
+
+  var links = linkHeader.split(',');
+  var nextPageLink = links.find(function(link) {
+    return link.includes('rel="next"');
+  });
+
+  if (!nextPageLink) {
+    return null;
+  }
+
+  var urlMatch = nextPageLink.match(/<(.*?)>; rel="next"/);
+  return urlMatch ? urlMatch[1] : null;
+}
+
+function processOrdersData(ordersData) {
+  var dailyRevenueSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Daily Revenue");
+  var productSalesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Product Sales");
+  var largestOrdersSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Largest Orders");
+
+  var mostRecentDate = getMostRecentDate(dailyRevenueSheet);
+  var targetDate = new Date(mostRecentDate);
+  targetDate.setDate(targetDate.getDate() + 1); // Date to fetch (next day after the most recent)
+  var formattedTargetDate = formatDate(targetDate);
+
+  var dailyRevenue = {};
+  var productSales = [];
+  var largestOrders = [];
+
+  ordersData.forEach(function(order) {
+    var orderDate = order.created_at.split("T")[0];
+    if (orderDate === formattedTargetDate) { // Check if order date matches the target date
+      var customerName = order.customer ? (order.customer.first_name + " " + order.customer.last_name) : "Unknown";
+
+      // Calculate daily revenue
+      if (!dailyRevenue[orderDate]) {
+        dailyRevenue[orderDate] = 0;
+      }
+      dailyRevenue[orderDate] += parseFloat(order.total_price);
+
+      // Record each product sale
+      order.line_items.forEach(function(item) {
+        productSales.push([
+          item.name,
+          parseFloat(item.price) * item.quantity,
+          item.quantity,
+          orderDate
+        ]);
+      });
+
+      // Track largest orders
+      largestOrders.push({
+        id: order.id,
+        customer: customerName,
+        total: parseFloat(order.total_price),
+        date: orderDate
+      });
+    }
+  });
+
+  // Append new data to the sheets
+  appendNewData(dailyRevenueSheet, Object.entries(dailyRevenue), ["Date", "Revenue"]);
+  appendNewData(productSalesSheet, productSales, ["Product", "Revenue", "Units Sold", "Sale Date"]);
+  appendNewData(largestOrdersSheet, largestOrders.map(function(order) {
+    return [
+      order.id.toString(),
+      order.customer,
+      order.total,
+      order.date
+    ];
+  }), ["Order ID", "Customer Name", "Amount", "Date"]);
+}
+
+function appendNewData(sheet, data, headers) {
+  data.forEach(function(row) {
+    sheet.appendRow(row);
+  });
+}
+
+function formatDate(date) {
+  var d = new Date(date),
+      month = '' + (d.getMonth() + 1),
+      day = '' + d.getDate(),
+      year = d.getFullYear();
+
+  if (month.length < 2) 
+      month = '0' + month;
+  if (day.length < 2) 
+      day = '0' + day;
+
+  return [year, month, day].join('-');
+}
+
+function setTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "fetchDataFromShopify") {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+
+  ScriptApp.newTrigger("fetchDataFromShopify")
+    .timeBased()
+    .atHour(23)
+    .inTimezone("Australia/Melbourne")
+    .everyDays(1)
+    .create();
+}
