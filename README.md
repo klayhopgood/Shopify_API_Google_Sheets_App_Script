@@ -10,3 +10,4 @@ Need to update with your Shopify-Access-Token on this line:
 Need to set up a google sheets with the pages Daily Revenue, Product Sales and Largest Orders
 Each page needs to have the headers mentioned above for the corresponding page. 
 
+The ongoing script is to then pull the new data the update the spreadsheet. that's the one to use on an ongoing basis
