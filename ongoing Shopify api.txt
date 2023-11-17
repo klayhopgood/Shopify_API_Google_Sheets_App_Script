@@ -1,9 +1,9 @@
 function fetchDataFromShopify() {
   var dailyRevenueSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Daily Revenue");
   var mostRecentDate = getMostRecentDate(dailyRevenueSheet);
-  mostRecentDate.setDate(mostRecentDate.getDate() + 1); // Start from the next day
-
+  mostRecentDate.setDate(mostRecentDate.getDate() - 1); // Adjust to start from the day before the most recent date
   var formattedStartDate = formatDate(mostRecentDate);
+
   var apiUrl = "https://ENTER HERE.myshopify.com/admin/api/2023-01/orders.json?status=any&created_at_min=" + formattedStartDate;
   var headers = {
     "X-Shopify-Access-Token": "ENTER HERE",
@@ -60,7 +60,7 @@ function processOrdersData(ordersData) {
 
   var mostRecentDate = getMostRecentDate(dailyRevenueSheet);
   var targetDate = new Date(mostRecentDate);
-  targetDate.setDate(targetDate.getDate() + 1); // Date to fetch (next day after the most recent)
+  targetDate.setDate(targetDate.getDate() + 1);
   var formattedTargetDate = formatDate(targetDate);
 
   var dailyRevenue = {};
@@ -69,7 +69,7 @@ function processOrdersData(ordersData) {
 
   ordersData.forEach(function(order) {
     var orderDate = order.created_at.split("T")[0];
-    if (orderDate === formattedTargetDate) { // Check if order date matches the target date
+    if (orderDate === formattedTargetDate) {
       var customerName = order.customer ? (order.customer.first_name + " " + order.customer.last_name) : "Unknown";
 
       // Calculate daily revenue
@@ -98,10 +98,13 @@ function processOrdersData(ordersData) {
     }
   });
 
-  // Append new data to the sheets
-  appendNewData(dailyRevenueSheet, Object.entries(dailyRevenue), ["Date", "Revenue"]);
-  appendNewData(productSalesSheet, productSales, ["Product", "Revenue", "Units Sold", "Sale Date"]);
-  appendNewData(largestOrdersSheet, largestOrders.map(function(order) {
+  updateSheetData(dailyRevenueSheet, Object.entries(dailyRevenue).map(function(entry) {
+    return [entry[0], entry[1]];
+  }), ["Date", "Revenue"]);
+
+  updateSheetData(productSalesSheet, productSales, ["Product", "Revenue", "Units Sold", "Sale Date"]);
+
+  updateSheetData(largestOrdersSheet, largestOrders.map(function(order) {
     return [
       order.id.toString(),
       order.customer,
@@ -111,9 +114,9 @@ function processOrdersData(ordersData) {
   }), ["Order ID", "Customer Name", "Amount", "Date"]);
 }
 
-function appendNewData(sheet, data, headers) {
+function updateSheetData(sheet, data, headers) {
   data.forEach(function(row) {
-    sheet.appendRow(row);
+    sheet.appendRow(row); // Append each row of data
   });
 }
 
